@@ -1,8 +1,7 @@
 # encoding=utf-8
 # ----------------------------------------
 # 语言：Python2.7
-# 日期：2017-03-24
-# 作者：九茶<http://blog.csdn.net/bone_ace>
+# 日期：2017-12-04
 # 功能：根据公司名称抓取员工的LinkedIn数据
 # ----------------------------------------
 
@@ -17,6 +16,7 @@ from lxml import etree
 
 import tkMessageBox as msgbox
 import tkinter as tk
+import threading
 
 reload(sys)
 sys.setdefaultencoding('utf8')
@@ -29,6 +29,8 @@ CREDIT_GRADE = {  # 芝麻信用
     'POOR': '较差'
 }
 LINKS_FINISHED = []  # 已抓取的linkedin用户
+
+is_start = False
 
 
 def login(laccount, lpassword):
@@ -68,17 +70,19 @@ def login(laccount, lpassword):
 
 
 def get_linkedin_url(url, s):
+    global filename
     """ 百度搜索出来的是百度跳转链接，要从中提取出linkedin链接 """
     try:
         r = s.get(url, allow_redirects=False)
         if r.status_code == 302 and 'Location' in r.headers.keys() and 'linkedin.com/in/' in r.headers['Location']:
             return r.headers['Location']
     except Exception, e:
-        print u'get linkedin url failed: %s' % url
+        print >> filename, u'get linkedin url failed: %s' % url
     return ''
 
 
 def parse(content, url):
+    global filename
     """ 解析一个员工的Linkedin主页 """
     content = unquote(content).replace('&quot;', '"')
 
@@ -86,48 +90,48 @@ def parse(content, url):
     firstname = re.findall('"firstName":"(.*?)"', profile_txt)
     lastname = re.findall('"lastName":"(.*?)"', profile_txt)
     if firstname and lastname:
-        print u'姓名: %s%s    Linkedin: %s' % (lastname[0], firstname[0], url)
+        print >> filename, u'姓名: %s%s    Linkedin: %s' % (lastname[0], firstname[0], url)
 
         summary = re.findall('"summary":"(.*?)"', profile_txt)
         if summary:
-            print u'简介: %s' % summary[0]
+            print >> filename, u'简介: %s' % summary[0]
 
         occupation = re.findall('"headline":"(.*?)"', profile_txt)
         if occupation:
-            print u'身份/职位: %s' % occupation[0]
+            print >> filename, u'身份/职位: %s' % occupation[0]
 
         locationName = re.findall('"locationName":"(.*?)"', profile_txt)
         if locationName:
-            print u'坐标: %s' % locationName[0]
+            print >> filename, u'坐标: %s' % locationName[0]
 
         networkInfo_txt = ' '.join(re.findall('(\{[^\{]*?profile\.ProfileNetworkInfo"[^\}]*?\})', content))
         connectionsCount = re.findall('"connectionsCount":(\d+)', networkInfo_txt)
         if connectionsCount:
-            print u'好友人数: %s' % connectionsCount[0]
+            print >> filename, u'好友人数: %s' % connectionsCount[0]
 
         sesameCredit_txt = ' '.join(re.findall('(\{[^\{]*?profile\.SesameCreditGradeInfo"[^\}]*?\})', content))
         credit_lastModifiedAt = re.findall('"lastModifiedAt":(\d+)', sesameCredit_txt)
         credit_grade = re.findall('"grade":"(.*?)"', sesameCredit_txt)
         if credit_grade and credit_grade[0] in CREDIT_GRADE.keys():
             credit_lastModifiedAt_date = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(int(credit_lastModifiedAt[0][:10]))) if credit_lastModifiedAt else ''
-            print u'芝麻信用: %s %s' % (CREDIT_GRADE[credit_grade[0]], u'   最后更新时间: %s' % credit_lastModifiedAt_date if credit_lastModifiedAt_date else '')
+            print >> filename, u'芝麻信用: %s %s' % (CREDIT_GRADE[credit_grade[0]], u'   最后更新时间: %s' % credit_lastModifiedAt_date if credit_lastModifiedAt_date else '')
 
         wechat_txt = ' '.join(re.findall('(\{[^\{]*?profile\.WeChatContactInfo"[^\}]*?\})', content))
         wechat_image = re.findall('"qrCodeImageUrl":"(http.*?)"', wechat_txt)
         wechat_name = re.findall('"name":"(.*?)"', wechat_txt)
         if wechat_name:
-            print u'微信昵称: %s %s' % (wechat_name[0], u'    二维码(链接): %s' % wechat_image[0].replace('&#61;', '=').replace('&amp;', '&') if wechat_image else '')
+            print >> filename, u'微信昵称: %s %s' % (wechat_name[0], u'    二维码(链接): %s' % wechat_image[0].replace('&#61;', '=').replace('&amp;', '&') if wechat_image else '')
         elif wechat_image:
-            print u'微信二维码(链接): %s' % wechat_image[0].replace('&#61;', '')
+            print >> filename, u'微信二维码(链接): %s' % wechat_image[0].replace('&#61;', '')
 
         website_txt = ' '.join(re.findall('("included":.*?profile\.StandardWebsite",.*?\})', content))
         website = re.findall('"url":"(.*?)"', website_txt)
         if website:
-            print u'个人网站: %s' % website[0]
+            print >> filename, u'个人网站: %s' % website[0]
 
         educations = re.findall('(\{[^\{]*?profile\.Education"[^\}]*?\})', content)
         if educations:
-            print u'教育经历:'
+            print >> filename, u'教育经历:'
         for one in educations:
             schoolName = re.findall('"schoolName":"(.*?)"', one)
             fieldOfStudy = re.findall('"fieldOfStudy":"(.*?)"', one)
@@ -157,11 +161,11 @@ def parse(content, url):
             if schoolName:
                 fieldOfStudy = '   %s' % fieldOfStudy[0] if fieldOfStudy else ''
                 degreeName = '   %s' % degreeName[0] if degreeName else ''
-                print u'    %s %s %s %s' % (schoolName[0], schoolTime, fieldOfStudy, degreeName)
+                print >> filename, u'    %s %s %s %s' % (schoolName[0], schoolTime, fieldOfStudy, degreeName)
 
         position = re.findall('(\{[^\{]*?profile\.Position"[^\}]*?\})', content)
         if position:
-            print u'工作经历:'
+            print >> filename, u'工作经历:'
         for one in position:
             companyName = re.findall('"companyName":"(.*?)"', one)
             title = re.findall('"title":"(.*?)"', one)
@@ -191,20 +195,20 @@ def parse(content, url):
             if companyName:
                 title = '   %s' % title[0] if title else ''
                 locationName = '   %s' % locationName[0] if locationName else ''
-                print u'    %s %s %s %s' % (companyName[0], positionTime, title, locationName)
+                print >> filename, u'    %s %s %s %s' % (companyName[0], positionTime, title, locationName)
 
         publication = re.findall('(\{[^\{]*?profile\.Publication"[^\}]*?\})', content)
         if publication:
-            print u'出版作品:'
+            print >> filename, u'出版作品:'
         for one in publication:
             name = re.findall('"name":"(.*?)"', one)
             publisher = re.findall('"publisher":"(.*?)"', one)
             if name:
-                print u'    %s %s' % (name[0], u'   出版社: %s' % publisher[0] if publisher else '')
+                print >> filename, u'    %s %s' % (name[0], u'   出版社: %s' % publisher[0] if publisher else '')
 
         honor = re.findall('(\{[^\{]*?profile\.Honor"[^\}]*?\})', content)
         if honor:
-            print u'荣誉奖项:'
+            print >> filename, u'荣誉奖项:'
         for one in honor:
             title = re.findall('"title":"(.*?)"', one)
             issuer = re.findall('"issuer":"(.*?)"', one)
@@ -219,11 +223,11 @@ def parse(content, url):
                     if month:
                         issueTime += '.%s' % month[0]
             if title:
-                print u'    %s %s %s' % (title[0], u'   发行人: %s' % issuer[0] if issuer else '', issueTime)
+                print >> filename, u'    %s %s %s' % (title[0], u'   发行人: %s' % issuer[0] if issuer else '', issueTime)
 
         organization = re.findall('(\{[^\{]*?profile\.Organization"[^\}]*?\})', content)
         if organization:
-            print u'参与组织:'
+            print >> filename, u'参与组织:'
         for one in organization:
             name = re.findall('"name":"(.*?)"', one)
             timePeriod = re.findall('"timePeriod":"(.*?)"', one)
@@ -249,11 +253,11 @@ def parse(content, url):
                     enddate = '现在'
                 organizationTime += '   %s ~ %s' % (startdate, enddate)
             if name:
-                print u'    %s %s' % (name[0], organizationTime)
+                print >> filename, u'    %s %s' % (name[0], organizationTime)
 
         patent = re.findall('(\{[^\{]*?profile\.Patent"[^\}]*?\})', content)
         if patent:
-            print u'专利发明:'
+            print >> filename, u'专利发明:'
         for one in patent:
             title = re.findall('"title":"(.*?)"', one)
             issuer = re.findall('"issuer":"(.*?)"', one)
@@ -274,11 +278,11 @@ def parse(content, url):
                         if day:
                             patentTime += '.%s' % day[0]
             if title:
-                print u'    %s %s %s %s %s %s' % (title[0], u'   发行者: %s' % issuer[0] if issuer else '', u'   专利号: %s' % number[0] if number else '', u'   所在国家: %s' % localizedIssuerCountryName[0] if localizedIssuerCountryName else '', patentTime, u'   专利详情页: %s' % url[0] if url else '')
+                print >> filename, u'    %s %s %s %s %s %s' % (title[0], u'   发行者: %s' % issuer[0] if issuer else '', u'   专利号: %s' % number[0] if number else '', u'   所在国家: %s' % localizedIssuerCountryName[0] if localizedIssuerCountryName else '', patentTime, u'   专利详情页: %s' % url[0] if url else '')
 
         project = re.findall('(\{[^\{]*?profile\.Project"[^\}]*?\})', content)
         if project:
-            print u'所做项目:'
+            print >> filename, u'所做项目:'
         for one in project:
             title = re.findall('"title":"(.*?)"', one)
             description = re.findall('"description":"(.*?)"', one)
@@ -305,11 +309,11 @@ def parse(content, url):
                     enddate = '现在'
                 projectTime += '   时间: %s ~ %s' % (startdate, enddate)
             if title:
-                print u'    %s %s %s' % (title[0], projectTime, u'   项目描述: %s' % description[0] if description else '')
+                print >> filename, u'    %s %s %s' % (title[0], projectTime, u'   项目描述: %s' % description[0] if description else '')
 
         volunteer = re.findall('(\{[^\{]*?profile\.VolunteerExperience"[^\}]*?\})', content)
         if volunteer:
-            print u'志愿者经历:'
+            print >> filename, u'志愿者经历:'
         for one in volunteer:
             companyName = re.findall('"companyName":"(.*?)"', one)
             role = re.findall('"role":"(.*?)"', one)
@@ -336,12 +340,13 @@ def parse(content, url):
                     enddate = '现在'
                 volunteerTime += '   时间: %s ~ %s' % (startdate, enddate)
             if companyName:
-                print u'    %s %s %s' % (companyName[0], volunteerTime, u'   角色: %s' % role[0] if role else '')
-    print u'\n\n'
+                print >> filename, u'    %s %s %s' % (companyName[0], volunteerTime, u'   角色: %s' % role[0] if role else '')
+    print >> filename, u'\n\n'
 
 
 def crawl(url, s):
     """ 抓取每一个搜索结果 """
+    global filename
     try:
         url = get_linkedin_url(url, copy.deepcopy(s)).replace('cn.linkedin.com', 'www.linkedin.com')  # 百度搜索出的结果是百度跳转链接，要提取出linkedin的链接。
         if len(url) > 0 and url not in LINKS_FINISHED:
@@ -358,19 +363,27 @@ def crawl(url, s):
                     parse(r.content, url)
                     break
                 else:
-                    print u'%s %s' % (r.status_code, url)
+                    print >> filename, u'%s %s' % (r.status_code, url)
                     failure += 2
             if failure >= 10:
-                print u'Failed: %s' % url
+                print >> filename, u'Failed: %s' % url
     except Exception, e:
         pass
 
 
-def runSpider(username = '766283550@qq.com', password = '32033520646', company =''):
-
+def runSpider(username = '', password = '', company =''):
+    global filename,is_start
+    if is_start:
+        return
+    is_start = True
+    filename = open(company + ".txt", "w")
     s = login(laccount=username, lpassword=password)  # 测试账号
     company_name = company
-    maxpage = 10  # 抓取前50页百度搜索结果，百度搜索最多显示76页
+
+    maxpage = 30  # 抓取前50页百度搜索结果，百度搜索最多显示76页
+    if app.v.get() == 2:
+        maxpage = 50
+    tempPage = maxpage
 
     # 百度搜索
     url = 'http://www.baidu.com/s?ie=UTF-8&wd=%20%7C%20领英%20' + quote(company_name) + '%20site%3Alinkedin.com'
@@ -393,23 +406,39 @@ def runSpider(username = '766283550@qq.com', password = '32033520646', company =
             failure = 0
             maxpage -= 1
             if maxpage <= 0:
+                app.proccess.set(u"下载数据完成！保存在文件%s.txt下"%company)
                 break
+            app.proccess.set(u"抓取数据中...%.0f%%"%(100*(tempPage-maxpage)/tempPage))
         else:
             failure += 2
-            print u'search failed: %s' % r.status_code
+            print >> filename, u'search failed: %s' % r.status_code
     if failure >= 10:
-        print u'search failed: %s' % url
+        print >> filename, u'search failed: %s' % url
+        app.proccess.set(u"下载数据失败！")
+    is_start = False
+    filename.close()
+
+class DownloadData(threading.Thread):
+    def __init__(self, u, p, c):
+        threading.Thread.__init__(self)
+        self.username = u
+        self.password = p
+        self.company = c
+
+    def run(self):
+        runSpider(username= self.username, password = self.password, company=self.company)
 
 
 class APP:
-    def __init__(self, width=500, height=300):
+    def __init__(self, width=500, height=350):
         self.w = width
         self.h = height
-        self.title = ' linkedinSpider'
+        self.title = ' LinkedIn数据爬取'
         self.root = tk.Tk(className=self.title)
         self.url = tk.StringVar()
         self.username = tk.StringVar()
         self.password = tk.StringVar()
+        self.proccess = tk.StringVar()
         self.v = tk.IntVar()
         self.v.set(1)
 
@@ -424,38 +453,46 @@ class APP:
         filemenu = tk.Menu(menu, tearoff=0)
         moviemenu = tk.Menu(menu, tearoff=0)
         menu.add_cascade(label='菜单', menu=filemenu)
-        filemenu.add_command(label='使用说明', command=lambda: msgbox.showinfo(title='使用说明', message='请输入'))
+        filemenu.add_command(label='使用说明', command=lambda: msgbox.showinfo(title='使用说明', message='根据公司名抓取员工Linkedin数据'))
         filemenu.add_command(label='关于作者', command=lambda: msgbox.showinfo(title='关于作者', message='田园黑叔叔'))
         filemenu.add_command(label='退出', command=self.root.quit)
 
 
         # 控件内容设置
+        group0 = tk.Label(frame_1, text='请选择一个下载模式：', padx=10, pady=10)
+        tb1 = tk.Radiobutton(frame_1, text='普通模式', variable=self.v, value=1, width=10, height=3)
+        tb2 = tk.Radiobutton(frame_1, text='强力模式', variable=self.v, value=2, width=10, height=3)
         group = tk.Label(frame_1, text='请输入用户名：', padx=10, pady=10)
-        tb1 = tk.Entry(frame_1, textvariable=self.username, highlightcolor='Fuchsia', highlightthickness=1, width=30)
+        un = tk.Entry(frame_1, textvariable=self.username, highlightcolor='Fuchsia', highlightthickness=1, width=30)
         group2 = tk.Label(frame_1, text='请输入密码：', padx=10, pady=10)
-        tb2 = tk.Entry(frame_1, textvariable=self.password, highlightcolor='Fuchsia', highlightthickness=1, width=30,show='*')
+        pw = tk.Entry(frame_1, textvariable=self.password, highlightcolor='Fuchsia', highlightthickness=1, width=30,show='*')
         label1 = tk.Label(frame_2, text="请输入公司名称：")
         entry = tk.Entry(frame_2, textvariable=self.url, highlightcolor='Fuchsia', highlightthickness=1, width=35)
         label2 = tk.Label(frame_2, text=" ")
         play = tk.Button(frame_2, text="开始", font=('楷体', 12), fg='Purple', width=2, height=1, command=self.start)
         label3 = tk.Label(frame_2, text=" ")
+        label_proccess = tk.Label(frame_3, textvariable=self.proccess, fg='blue', font=('楷体', 12), text='')
         label_explain = tk.Label(frame_3, fg='red', font=('楷体', 12),
-                                 text='\n注意：请在浏览器中登录您输入的领英帐号再使用本软件！\n此软件仅用于交流学习，请勿用于任何商业用途！')
-        label_warning = tk.Label(frame_3, fg='blue', font=('楷体', 12), text='\n建议：没有建议！')
+                                 text='\n注意：请在浏览器中登录您输入的领英帐号再使用本软件！\n此软件会抓取可能的匹配数据，最终数据的可用性还需要您的甄别！\n此软件仅用于交流学习，请勿用于任何商业用途！')
+        label_warning = tk.Label(frame_3, fg='blue', font=('楷体', 12), text='\n建议：普通模式下若没有您需要的数据，请尝试强力模式！')
 
         # 控件布局
         frame_1.pack()
         frame_2.pack()
         frame_3.pack()
-        group.grid(row=0, column=0)
+        group0.grid(row=0, column=0)
         tb1.grid(row=0, column=1)
-        group2.grid(row=1, column=0)
-        tb2.grid(row=1, column=1)
+        tb2.grid(row=0, column=2)
+        group.grid(row=1, column=0)
+        un.grid(row=1, column=1)
+        group2.grid(row=2, column=0)
+        pw.grid(row=2, column=1)
         label1.grid(row=0, column=0)
         entry.grid(row=0, column=1)
         label2.grid(row=0, column=2)
         play.grid(row=0, column=3, ipadx=10, ipady=10)
         label3.grid(row=0, column=4)
+        label_proccess.grid(row=0, column=0)
         label_explain.grid(row=1, column=0)
         label_warning.grid(row=2, column=0)
 
@@ -481,7 +518,9 @@ class APP:
         elif self.url.get() == '':
             msgbox.showerror(title='错误', message='请输入公司名称！')
         else:
-            runSpider(company = self.url.get())
+            app.proccess.set(u"准备抓取数据，请稍候...")
+            my_data = DownloadData(self.username.get(),self.password.get(),self.url.get())
+            my_data.start()
 
     """
     函数说明:tkinter窗口居中
